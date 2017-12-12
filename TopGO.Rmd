@@ -1,0 +1,347 @@
+---
+title: "tipburn_GO"
+output: html_document
+---
+
+```{r}
+path = "/Users/rongkui/Desktop/Lab/TipBurn/WGCNA"
+setwd(paste(path))
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("goseq")
+library(goseq)
+
+genes = read.csv("all_counts.csv", stringsAsFactors = FALSE)
+head(genes)
+genes = genes[,-c(1,10,18)] #taking out B2D28 B3F30
+dim(genes)
+head(genes)
+exp.genes = genes[rowSums(genes > 10) >= 7,] 
+dim(exp.genes) #23768... different than datExpr (23568). But I doubt if we will use exp.genes. We will probably just use datExpr. 
+
+go.terms = read.csv("Lsat.1.v5.gene.primaryTranscript.GOannotations.csv", as.is = TRUE)
+head(go.terms)
+go.terms = go.terms[,c(1,3)]
+names(go.terms) = c("GeneID","GO")
+summary(go.terms)
+load("TipBurn-01-dataInput.RData")
+load("TipBurn-02-networkConstruction-SbS.RData")
+names(datExpr)
+length(names(datExpr)) #23568
+```
+
+```{r}
+gene.lengths = read.delim("Lsat.1.v5.gene.allTranscript.gff3.genemodelstats.txt", stringsAsFactors = FALSE)
+head(gene.lengths$gene_model)
+dim(gene.lengths)
+length.names = as.data.frame(strsplit(gene.lengths$gene_model, ".", fixed= TRUE))
+names = t(length.names[1,])
+head(names)
+dim(names)
+rownames(names) = c(1:62670)
+gene.length = as.data.frame(cbind(names, gene.lengths$CDS_length))
+head(gene.length)
+names(gene.length) = c("GeneID","Length")
+gene.length$Length = as.numeric(paste(gene.length$Length))
+filter = t(length.names[2,])
+head(filter)
+gene.length = gene.length[filter == "1",]
+dim(gene.length)
+gene.lengths.vector = gene.length$Length[gene.length$GeneID %in% names(datExpr)]
+length(gene.lengths.vector) #22319
+names(gene.lengths.vector) = gene.length$GeneID[gene.length$GeneID %in% names(datExpr)]
+head(gene.lengths.vector)
+expressed.gene.match = names(datExpr)[names(datExpr) %in% names(gene.lengths.vector)]
+```
+
+```{r}
+go.list = strsplit(go.terms$GO,split = ",") #need it in list form
+#go.list
+names = as.data.frame(strsplit(go.terms$GeneID, split = ".", fixed = TRUE))
+names2 = t(names)
+names(go.list) = names2[,1]
+head(go.list)
+```
+ 
+ Lightgreen module:  
+```{r}
+length(moduleColors) #same as length(datExpr), 23568
+table(moduleColors)
+lg.genes = names(datExpr)[moduleColors == "lightgreen"]
+lg.genes
+length(lg.genes) #71
+
+lg.genes2 = expressed.gene.match %in% lg.genes
+lg.genes2 = as.numeric(lg.genes2)
+names(lg.genes2) = expressed.gene.match
+head(lg.genes2)
+sum(lg.genes2) #69 np.
+```
+
+Calculate over-representation in lightgreen module:
+```{r}
+nullp.result = nullp(DEgenes = lg.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="lightgreen_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+Now move on to grey 60:  
+```{r}
+g6.genes = names(datExpr)[moduleColors == "grey60"]
+g6.genes
+length(g6.genes) #88
+
+g6.genes2 = expressed.gene.match %in% g6.genes
+g6.genes2 = as.numeric(g6.genes2)
+names(g6.genes2) = expressed.gene.match
+head(g6.genes2)
+sum(g6.genes2) #86
+
+nullp.result = nullp(DEgenes = g6.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="grey60_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+Now black:  
+```{r}
+bl.genes = names(datExpr)[moduleColors == "black"]
+bl.genes
+length(bl.genes) #4516.......
+
+bl.genes2 = expressed.gene.match %in% bl.genes
+bl.genes2 = as.numeric(bl.genes2)
+names(bl.genes2) = expressed.gene.match
+head(bl.genes2)
+sum(bl.genes2) #4355
+
+nullp.result = nullp(DEgenes = bl.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="black_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+Now purple:
+```{r}
+pr.genes = names(datExpr)[moduleColors == "purple"]
+pr.genes
+length(pr.genes) #326
+
+pr.genes2 = expressed.gene.match %in% pr.genes
+pr.genes2 = as.numeric(pr.genes2)
+names(pr.genes2) = expressed.gene.match
+head(pr.genes2)
+sum(pr.genes2) #318
+
+nullp.result = nullp(DEgenes = pr.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="purple_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+What about looking at all the differentially expressed genes? We will start from Emperor (susceptible parent):   
+```{r}
+Emp.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.Emperor.csv", stringsAsFactors = FALSE)
+head(Emp.DE)
+emp.genes = Emp.DE$X
+length(emp.genes) #2395
+
+emp.genes2 = expressed.gene.match %in% emp.genes
+emp.genes2 = as.numeric(emp.genes2)
+names(emp.genes2) = expressed.gene.match
+head(emp.genes2)
+sum(emp.genes2) #2147
+
+nullp.result = nullp(DEgenes = emp.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="Emporer_DEgenes_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+OK 174 too maybe... (also susceptible):  
+```{r}
+G174.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G174.csv", stringsAsFactors = FALSE)
+head(G174.DE)
+G174.genes = G174.DE$X
+length(G174.genes) #2257
+
+G174.genes2 = expressed.gene.match %in% G174.genes
+G174.genes2 = as.numeric(G174.genes2)
+names(G174.genes2) = expressed.gene.match
+head(G174.genes2)
+sum(G174.genes2) #2057
+
+nullp.result = nullp(DEgenes = G174.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G174_DEgenes_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+OK 276 might as well (susceptible):  
+```{r}
+G267.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G267.csv", stringsAsFactors = FALSE)
+head(G267.DE)
+G267.genes = G267.DE$X
+length(G267.genes) #4613 !!
+
+G267.genes2 = expressed.gene.match %in% G267.genes
+G267.genes2 = as.numeric(G267.genes2)
+names(G267.genes2) = expressed.gene.match
+head(G267.genes2)
+sum(G267.genes2) #4341
+
+nullp.result = nullp(DEgenes = G267.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G267_DEgenes_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+Now onto resistent progeny #1 (15G209):  
+```{r}
+G209.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G209.csv", stringsAsFactors = FALSE)
+head(G209.DE)
+G209.genes = G209.DE$X
+length(G209.genes) #1112
+
+G209.genes2 = expressed.gene.match %in% G209.genes
+G209.genes2 = as.numeric(G209.genes2)
+names(G209.genes2) = expressed.gene.match
+head(G209.genes2)
+sum(G209.genes2) #970
+
+nullp.result = nullp(DEgenes = G209.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G209_DEgenes_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+The other resistant progeny (15G268):  
+```{r}
+G368.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G368.csv", stringsAsFactors = FALSE)
+head(G368.DE)
+G368.genes = G368.DE$X
+length(G368.genes) #4613 !!
+
+G368.genes2 = expressed.gene.match %in% G368.genes
+G368.genes2 = as.numeric(G368.genes2)
+names(G368.genes2) = expressed.gene.match
+head(G368.genes2)
+sum(G368.genes2) #4341
+
+nullp.result = nullp(DEgenes = G368.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G368_DEgenes_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+OK this is not endding anytime soon... let's look at using Empire (susceptible) as reference:  
+
+Eldorado (resistant parent):  
+```{r}
+Eldo.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.ElDorado.csv", stringsAsFactors = FALSE)
+head(Eldo.DE)
+eld.genes = Eldo.DE$X
+length(eld.genes) #2395 
+
+eld.genes2 = expressed.gene.match %in% eld.genes
+eld.genes2 = as.numeric(eld.genes2)
+names(eld.genes2) = expressed.gene.match
+head(eld.genes2)
+sum(eld.genes2) #2147
+
+nullp.result = nullp(DEgenes = eld.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="ElDorado_DEgenes_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+Now onto resistent progeny #1 (15G209):    
+```{r}
+G209.empref.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G209.EmperorRef.csv", stringsAsFactors = FALSE)
+head(G209.empref.DE)
+G209.empref.genes = G209.empref.DE$X
+length(G209.empref.genes) #578
+
+G209.empref.genes2 = expressed.gene.match %in% G209.empref.genes
+G209.empref.genes2 = as.numeric(G209.empref.genes2)
+names(G209.empref.genes2) = expressed.gene.match
+head(G209.empref.genes2)
+sum(G209.empref.genes2) #497
+
+nullp.result = nullp(DEgenes = G209.empref.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G209_DEgenes.empref_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+The other resistant progeny (15G268):  
+```{r}
+G368.empref.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G368.EmperorRef.csv", stringsAsFactors = FALSE)
+head(G368.empref.DE)
+G368.empref.genes = G368.empref.DE$X
+length(G368.empref.genes) #2413
+
+G368.empref.genes2 = expressed.gene.match %in% G368.empref.genes
+G368.empref.genes2 = as.numeric(G368.empref.genes2)
+names(G368.empref.genes2) = expressed.gene.match
+head(G368.empref.genes2)
+sum(G368.empref.genes2) #2263
+
+nullp.result = nullp(DEgenes = G368.empref.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G368_DEgenes.empref_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+174 (susceptible):  
+```{r}
+G174.empref.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G174.EmperorRef.csv", stringsAsFactors = FALSE)
+head(G174.empref.DE)
+G174.empref.genes = G174.empref.DE$X
+length(G174.empref.genes) #231
+
+G174.empref.genes2 = expressed.gene.match %in% G174.empref.genes
+G174.empref.genes2 = as.numeric(G174.empref.genes2)
+names(G174.empref.genes2) = expressed.gene.match
+head(G174.empref.genes2)
+sum(G174.empref.genes2) #192
+
+nullp.result = nullp(DEgenes = G174.empref.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G174_DEgenes.empref_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+
+276 (susceptible):  
+```{r}
+G267.empref.DE = read.csv("/Users/rongkui/Desktop/Lab/TipBurn/DE/DEgene.15G267.EmperorRef.csv", stringsAsFactors = FALSE)
+head(G267.empref.DE)
+G267.empref.genes = G267.empref.DE$X
+length(G267.empref.genes) #1191
+
+G267.empref.genes2 = expressed.gene.match %in% G267.empref.genes
+G267.empref.genes2 = as.numeric(G267.empref.genes2)
+names(G267.empref.genes2) = expressed.gene.match
+head(G267.empref.genes2)
+sum(G267.empref.genes2) #1072
+
+nullp.result = nullp(DEgenes = G267.empref.genes2, bias.data = gene.lengths.vector)
+rownames(nullp.result) = names(gene.lengths.vector)
+GO.out = goseq(pwf = nullp.result, gene2cat = go.list, test.cats=("GO:BP"))
+GO.out[GO.out$over_represented_pvalue < 0.05,]
+write.table(GO.out[GO.out$over_represented_pvalue < 0.05,1:2],row.names=FALSE,file="G267_DEgenes.empref_GO_terms.txt", quote = FALSE,col.names = FALSE)
+```
+

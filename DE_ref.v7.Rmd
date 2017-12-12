@@ -1,0 +1,715 @@
+---
+title: "YumaTB_DE_ref.v7"
+output: html_document
+---
+Reading in the read count file and sample name file. Put them together into one file.  
+```{r}
+path = "/Users/rongkui/Desktop/Lab/TipBurn/"
+setwd(paste(path))
+count = read.delim("tmp.out", header = FALSE, stringsAsFactors = FALSE)
+head(count)
+dim(count)
+header= read.delim("headers.txt", header = FALSE, as.is = TRUE)
+head(header)
+length(header)
+colnames(count)[2:31] = header
+colnames(count)[1] = "Genes"
+colnames(count)
+#View(count)
+str(count)
+colnames(count)[18] = "B3G31" #fixing a typo
+#write.csv(count, file = "all_counts.csv")
+#save(count, file = "all_counts.RData")
+head(count)
+count = count[,-7] #taking out sample B1L27 (genotype 15G187), because it is not replicated in the experiment. 
+dim(count)
+```
+
+Loading phenotype and genotype data:  
+```{r}
+pg = read.csv("TipBurn_Pheno_Geno.csv", header = TRUE)
+pg
+pg = pg[-6,] #taking out B1L27
+pg
+#View(pg)
+```
+
+Loading the genes Miguel is interested in:  
+```{r}
+int = read.csv("Interesting_Genes.csv")
+dim(int)
+int.count = count[is.na(match(count$Genes, int$Int.Gene)) == FALSE,]
+int.count
+#View(int.count)
+geno.int = pg$Genotype[match(as.factor(colnames(count)), pg$RNAseq.Sample.Name)]
+geno.int
+int.count = rbind(as.character(geno.int), int.count)
+#View(int.count)
+#write.csv(int.count, file="Read_counts_interesting_genes.csv")
+```
+
+#looks like B2D28 and B3F30 have abnormal read counts. Leave those out:  
+```{r}
+count = count[,-c(8,16)]
+head(count)
+dim(count) #should be 67975 28
+
+pg = pg[-c(11,19),]
+pg
+dim(pg) #should be 27 18
+```
+
+Filtering data to keep only the genes with some expression (> 10 reads in >= 5 samples out of 30):  
+```{r}
+count.filt= count[rowSums(count > 10) >= 5,]
+#View(count.filt)
+count = count.filt
+rm(count.filt)
+rownames(count) = count[,1]
+count = count[,-1]
+dim(count) #should be ~24K 27
+```
+
+Creating sample description:   
+```{r}
+desc = data.frame(
+  sample = colnames(count)[1:27],
+  geno = pg$Genotype[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)],
+  hap1 = pg$Hap1[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)],
+  hap2 = pg$Hap2[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)],
+  hap3 = pg$Hap3[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)],
+  hap4 = pg$Hap4[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)],
+  hap5 = pg$Hap5[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)],
+  block = pg$Block[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)], 
+  pheno = pg$Average.Severity[match(colnames(count)[1:27],pg$RNAseq.Sample.Name)]
+)
+desc
+desc$group = paste(desc$geno, desc$hap1, desc$hap2, desc$hap3, desc$hap4, desc$hap5, desc$block, sep = "_")
+head(desc)
+desc$geno = relevel(desc$geno, ref = "ElDorado")
+desc
+```
+
+Calculate normalization factors:  
+```{r}
+library(edgeR)
+dge.data = DGEList(counts = count, group = desc$group)
+dim(dge.data)
+dge.data = calcNormFactors(dge.data, method = "TMM")
+dge.data$samples
+```
+
+Making a plot of the biological coefficient of variation of each sample:  
+```{r}
+plotMDS(dge.data, method = "bcv", labels = desc$geno)
+```
+
+Tell edgeR about experimental design:   
+OK I honestly dont know what kind of design matrix I should use. I will be trying different kinds of design matrices and see what I find.  
+
+This first design matrix features differet haplotypes:  
+(ended up not using this)    
+```{r}
+design1 = model.matrix(~hap1+hap2+hap3+hap4+hap5, data = desc)
+rownames(design1) = desc$sample
+design1
+```
+
+Now we estimate the dispersions:  
+```{r}
+#first the overall dispersion
+dge.data1 = estimateGLMCommonDisp(dge.data, design1, verbose = TRUE)
+dge.data1 = estimateGLMTrendedDisp(dge.data1, design1)
+dge.data1 = estimateGLMTagwiseDisp(dge.data1, design1)
+plotBCV(dge.data1)
+```
+
+Find differentially expressed genes by haplotype:  
+```{r}
+fit = glmFit(dge.data1,design1)
+hap1.lrt = glmLRT(fit, coef = "hap1E")
+topTags(hap1.lrt)
+DEgene.hap1 <- topTags(hap1.lrt,n = Inf)$table[topTags(hap1.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.hap1)
+write.csv(DEgene.hap1, "DEgene.hap1.csv")
+hap2.lrt = glmLRT(fit, coef = "hap2E")
+topTags(hap2.lrt)
+DEgene.hap2 <- topTags(hap2.lrt,n = Inf)$table[topTags(hap2.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.hap2)
+write.csv(DEgene.hap2, "DEgene.hap2.csv")
+hap3.lrt = glmLRT(fit, coef = "hap3E")
+topTags(hap3.lrt)
+DEgene.hap3 <- topTags(hap3.lrt,n = Inf)$table[topTags(hap3.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.hap3)
+write.csv(DEgene.hap3, "DEgene.hap3.csv")
+
+#hap3 is the one that we are interested in:
+match(int.gene, DEgene.hap3)
+#no match...
+
+hap4.lrt = glmLRT(fit, coef = "hap4E")
+topTags(hap4.lrt)
+DEgene.hap4 <- topTags(hap4.lrt,n = Inf)$table[topTags(hap4.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.hap4)
+write.csv(DEgene.hap4, "DEgene.hap4.csv")
+hap5.lrt = glmLRT(fit, coef = "hap5E")
+topTags(hap5.lrt)
+DEgene.hap5 <- topTags(hap5.lrt,n = Inf)$table[topTags(hap5.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.hap5)
+write.csv(DEgene.hap5, "DEgene.hap5.csv")
+```
+
+Try using Emperor haplotype 3 as the reference, and only hap3 as variable for design matrix:  
+```{r}
+desc$hap3 = relevel(desc$hap3, ref = "E")
+design1.1 = model.matrix(~hap3, data = desc)
+design1.1
+rownames(design1.1) = desc$sample
+design1.1
+
+dge.data1.1 = estimateGLMCommonDisp(dge.data, design1.1, verbose = TRUE)
+dge.data1.1 = estimateGLMTrendedDisp(dge.data1.1, design1.1)
+dge.data1.1 = estimateGLMTagwiseDisp(dge.data1.1, design1.1)
+plotBCV(dge.data1.1)
+
+fit1.1 = glmFit(dge.data1.1,design1.1)
+
+new.hap3.lrt = glmLRT(fit1.1, coef = "hap3D")
+topTags(new.hap3.lrt)
+DEgene.hap3.new <- topTags(new.hap3.lrt,n = Inf)$table[topTags(new.hap3.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.hap3.new)
+write.csv(DEgene.hap3.new, "DEgene.only_hap3.csv")
+
+match(int.gene, rownames(DEgene.hap3.new)) ###YAAS
+DE.int.hap3 = data.frame(DEgene.hap3.new$logFC[match(int.gene, rownames(DEgene.hap3.new))])
+colnames(DE.int.hap3) = "LogFC"
+rownames(DE.int.hap3) = int.gene
+DE.int.hap3$FDR = DEgene.hap3.new$FDR[match(int.gene, rownames(DEgene.hap3.new))]
+DE.int.hap3
+write.csv(DE.int.hap3, "DE_InterestingGenes_Hap3_EmperorRef_logFC.csv")
+```
+
+
+
+The DE by haplotype analysis was largely fruitless. So now we are going to look at DE by just genotype information: (ElDorado is used as reference.)   
+```{r}
+desc$geno = as.factor(desc$geno)
+desc$geno = relevel(desc$geno, ref = "ElDorado")
+design2 = model.matrix(~geno, data = desc)
+rownames(design2) = desc$sample
+design2
+#design2 = design2[,-4] #taking out 187
+#design2
+```
+
+```{r}
+dge.data2 = estimateGLMCommonDisp(dge.data, design2, verbose = TRUE)
+dge.data2 = estimateGLMTrendedDisp(dge.data2, design2)
+dge.data2 = estimateGLMTagwiseDisp(dge.data2, design2)
+plotBCV(dge.data2)
+```
+
+Finding DE genes:  
+```{r}
+fit2 = glmFit(dge.data2,design2)
+geno15G174.lrt = glmLRT(fit2, coef = "geno15G174")
+topTags(geno15G174.lrt)
+DEgene.geno15G174 <- topTags(geno15G174.lrt,n = Inf)$table[topTags(geno15G174.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G174)
+#write.csv(DEgene.geno15G174, "DEgene.15G174.csv")
+
+#geno15G187.lrt = glmLRT(fit2, coef = "geno15G187")
+#topTags(geno15G187.lrt)
+#DEgene.geno15G187 <- topTags(geno15G187.lrt,n = Inf)$table[topTags(geno15G187.lrt,n = Inf)$table$FDR<0.01,]
+#dim(DEgene.geno15G187)
+#write.csv(DEgene.geno15G187, "DEgene.15G187.csv")
+
+geno15G209.lrt = glmLRT(fit2, coef = "geno15G209")
+topTags(geno15G209.lrt)
+DEgene.geno15G209 <- topTags(geno15G209.lrt,n = Inf)$table[topTags(geno15G209.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G209)
+#write.csv(DEgene.geno15G209, "DEgene.15G209.csv")
+
+geno15G267.lrt = glmLRT(fit2, coef = "geno15G267")
+topTags(geno15G267.lrt)
+DEgene.geno15G267 <- topTags(geno15G267.lrt,n = Inf)$table[topTags(geno15G267.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G267)
+#write.csv(DEgene.geno15G267, "DEgene.15G267.csv")
+
+geno15G368.lrt = glmLRT(fit2, coef = "geno15G368")
+topTags(geno15G368.lrt)
+DEgene.geno15G368 <- topTags(geno15G368.lrt,n = Inf)$table[topTags(geno15G368.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G368)
+#write.csv(DEgene.geno15G368, "DEgene.15G368.csv")
+
+genoEmperor.lrt = glmLRT(fit2, coef = "genoEmperor")
+topTags(genoEmperor.lrt)
+DEgene.genoEmperor <- topTags(genoEmperor.lrt,n = Inf)$table[topTags(genoEmperor.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.genoEmperor)
+#write.csv(DEgene.genoEmperor, "DEgene.Emperor.csv")
+```
+
+Are there any interesting genes in the DEgene lists?  
+```{r}
+int.gene = int$Int.Gene
+head(int.gene)
+DE.15G174.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G174))) == FALSE]
+length(DE.15G174.int) #2
+
+#DE.15G187.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G187))) == FALSE]
+#length(DE.15G187.int) #0
+
+DE.15G209.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G209))) == FALSE]
+length(DE.15G209.int) #2
+
+DE.15G267.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G267))) == FALSE]
+length(DE.15G267.int) #longest list, 7, happening to contain ALL the DE genes in other genotypes. 
+
+DE.15G368.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G368))) == FALSE]
+length(DE.15G368.int) #0
+
+DE.Emporer.int = int.gene[is.na(match(int.gene, rownames(DEgene.genoEmperor))) == FALSE]
+length(DE.Emporer.int) #4
+
+DE.int = data.frame(row.names = int.gene)
+DE.int$geno15G174 = DEgene.geno15G174$logFC[match(int.gene, rownames(DEgene.geno15G174))]
+#DE.int$geno15G187 = DEgene.geno15G187$logFC[match(int.gene, rownames(DEgene.geno15G187))]
+DE.int$geno15G209 = DEgene.geno15G209$logFC[match(int.gene, rownames(DEgene.geno15G209))]
+DE.int$geno15G267 = DEgene.geno15G267$logFC[match(int.gene, rownames(DEgene.geno15G267))] #longest list
+DE.int$geno15G368 = DEgene.geno15G368$logFC[match(int.gene, rownames(DEgene.geno15G368))]
+DE.int$Emperor = DEgene.genoEmperor$logFC[match(int.gene, rownames(DEgene.genoEmperor))]
+DE.int
+#write.csv(DE.int, file = "DE_InterestingGenes_ElDoradoRef_logFC.csv")
+```
+
+What about other genes on Chromosome5?
+
+```{r}
+chr5 = read.csv("Genes.Chr5.csv", stringsAsFactors = FALSE)
+DE.chr5 = data.frame(row.names = chr5$Gene)
+DE.chr5$geno15G174 = DEgene.geno15G174$logFC[match(chr5$Gene,rownames(DEgene.geno15G174))]
+DE.chr5$geno15G209 = DEgene.geno15G209$logFC[match(chr5$Gene,rownames(DEgene.geno15G209))]
+DE.chr5$geno15G267 = DEgene.geno15G267$logFC[match(chr5$Gene,rownames(DEgene.geno15G267))]
+DE.chr5$geno15G368 = DEgene.geno15G368$logFC[match(chr5$Gene,rownames(DEgene.geno15G368))]
+DE.chr5$Emperor = DEgene.genoEmperor$logFC[match(chr5$Gene,rownames(DEgene.genoEmperor))]
+DE.chr5
+#write.csv(DE.chr5, file = "DE_chromosome5_ElDoradoRef_logFC.csv")
+```
+
+Two additional genes: Lsat_1_v5_gn_5_126860 and Lsat_1_v5_gn_5_126901
+```{r}
+DE.two = data.frame(row.names = c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"))
+dim(DE.two)
+DE.two$geno15G174 = DEgene.geno15G174$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G174))]
+DE.two$geno15G209 = DEgene.geno15G209$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G209))]
+DE.two$geno15G267 = DEgene.geno15G267$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G267))]
+DE.two$geno15G368 = DEgene.geno15G368$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G368))]
+DE.two$Emperor = DEgene.genoEmperor$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.genoEmperor))]
+DE.two
+```
+
+
+
+Redoing the analysis using Emporer as the reference:  
+```{r}
+desc$geno = relevel(desc$geno, ref = "Emperor")
+dge.data = DGEList(counts = count, group = desc$group)
+dim(dge.data)
+dge.data = calcNormFactors(dge.data, method = "TMM")
+dge.data$samples
+```
+
+Design matrix3:  
+```{r}
+design3 = model.matrix(~geno, data = desc)
+rownames(design3) = desc$sample
+design3
+design3 = design3[,-4] #taking out 187
+```
+
+```{r}
+dge.data3 = estimateGLMCommonDisp(dge.data, design3, verbose = TRUE)
+dge.data3 = estimateGLMTrendedDisp(dge.data3, design3)
+dge.data3 = estimateGLMTagwiseDisp(dge.data3, design3)
+plotBCV(dge.data3)
+```
+
+Finding DE geens:    
+```{r}
+fit3 = glmFit(dge.data3,design3)
+emp.geno15G174.lrt = glmLRT(fit3, coef = "geno15G174")
+topTags(emp.geno15G174.lrt)
+DEgene.emp.geno15G174 <- topTags(emp.geno15G174.lrt,n = Inf)$table[topTags(emp.geno15G174.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.emp.geno15G174)
+#write.csv(DEgene.emp.geno15G174, "DEgene.15G174.EmperorRef.csv")
+
+emp.geno15G209.lrt = glmLRT(fit3, coef = "geno15G209")
+topTags(emp.geno15G209.lrt)
+DEgene.emp.geno15G209 <- topTags(emp.geno15G209.lrt,n = Inf)$table[topTags(emp.geno15G209.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.emp.geno15G209)
+#write.csv(DEgene.emp.geno15G209, "DEgene.15G209.EmperorRef.csv")
+
+emp.geno15G267.lrt = glmLRT(fit3, coef = "geno15G267")
+topTags(emp.geno15G267.lrt)
+DEgene.emp.geno15G267 <- topTags(emp.geno15G267.lrt,n = Inf)$table[topTags(emp.geno15G267.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.emp.geno15G267)
+#write.csv(DEgene.emp.geno15G267, "DEgene.15G267.EmperorRef.csv")
+
+emp.geno15G368.lrt = glmLRT(fit3, coef = "geno15G368")
+topTags(emp.geno15G368.lrt)
+DEgene.emp.geno15G368 <- topTags(emp.geno15G368.lrt,n = Inf)$table[topTags(emp.geno15G368.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.emp.geno15G368)
+#write.csv(DEgene.emp.geno15G368, "DEgene.15G368.EmperorRef.csv")
+
+genoEldorado.lrt = glmLRT(fit3, coef = "genoElDorado")
+topTags(genoEldorado.lrt)
+DEgene.genoEldorado <- topTags(genoEldorado.lrt,n = Inf)$table[topTags(genoEldorado.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.genoEldorado)
+#write.csv(DEgene.genoEldorado, "DEgene.ElDorado.csv")
+```
+Interesting DE genes:  
+```{r}
+int.gene = int$Int.Gene
+head(int.gene)
+DE.emp.15G174.int = int.gene[is.na(match(int.gene, rownames(DEgene.emp.geno15G174))) == FALSE]
+length(DE.emp.15G174.int) #2
+
+#DE.15G187.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G187))) == FALSE]
+#length(DE.15G187.int) #0
+
+DE.emp.15G209.int = int.gene[is.na(match(int.gene, rownames(DEgene.emp.geno15G209))) == FALSE]
+length(DE.emp.15G209.int) #0 (was 2 for ElDorado reference)
+
+DE.emp.15G267.int = int.gene[is.na(match(int.gene, rownames(DEgene.emp.geno15G267))) == FALSE]
+length(DE.emp.15G267.int) #0, as opposed to 7
+
+DE.emp.15G368.int = int.gene[is.na(match(int.gene, rownames(DEgene.emp.geno15G368))) == FALSE]
+length(DE.emp.15G368.int) #4, as opposed to 0
+
+DE.ElDorado.int = int.gene[is.na(match(int.gene, rownames(DEgene.genoEldorado))) == FALSE]
+length(DE.ElDorado.int) #4
+
+DE.int2 = data.frame(row.names = int.gene)
+DE.int2$geno15G174 = DEgene.emp.geno15G174$logFC[match(int.gene, rownames(DEgene.emp.geno15G174))]
+#DE.int$geno15G187 = DEgene.geno15G187$logFC[match(int.gene, rownames(DEgene.geno15G187))]
+DE.int2$geno15G209 = DEgene.emp.geno15G209$logFC[match(int.gene, rownames(DEgene.emp.geno15G209))]
+DE.int2$geno15G267 = DEgene.emp.geno15G267$logFC[match(int.gene, rownames(DEgene.emp.geno15G267))] #longest list
+DE.int2$geno15G368 = DEgene.emp.geno15G368$logFC[match(int.gene, rownames(DEgene.emp.geno15G368))]
+DE.int2$ElDorado = DEgene.genoEldorado$logFC[match(int.gene, rownames(DEgene.genoEldorado))]
+DE.int2
+#write.csv(DE.int2, file = "DE_InterestingGenes_EmperorRef_logFC.csv")
+```
+
+
+The DE by haplotype analysis was largely fruitless. So now we are going to look at DE by just genotype information: (ElDorado is used as reference.)   
+```{r}
+desc$geno = relevel(desc$geno, ref = "ElDorado")
+design2 = model.matrix(~geno, data = desc)
+rownames(design2) = desc$sample
+design2
+design2 = design2[,-4] #taking out 187
+design2
+```
+
+```{r}
+dge.data2 = estimateGLMCommonDisp(dge.data, design2, verbose = TRUE)
+dge.data2 = estimateGLMTrendedDisp(dge.data2, design2)
+dge.data2 = estimateGLMTagwiseDisp(dge.data2, design2)
+plotBCV(dge.data2)
+```
+
+Finding DE genes:  
+```{r}
+fit2 = glmFit(dge.data2,design2)
+geno15G174.lrt = glmLRT(fit2, coef = "geno15G174")
+topTags(geno15G174.lrt)
+DEgene.geno15G174 <- topTags(geno15G174.lrt,n = Inf)$table[topTags(geno15G174.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G174)
+#write.csv(DEgene.geno15G174, "DEgene.15G174.csv")
+
+#geno15G187.lrt = glmLRT(fit2, coef = "geno15G187")
+#topTags(geno15G187.lrt)
+#DEgene.geno15G187 <- topTags(geno15G187.lrt,n = Inf)$table[topTags(geno15G187.lrt,n = Inf)$table$FDR<0.01,]
+#dim(DEgene.geno15G187)
+#write.csv(DEgene.geno15G187, "DEgene.15G187.csv")
+
+geno15G209.lrt = glmLRT(fit2, coef = "geno15G209")
+topTags(geno15G209.lrt)
+DEgene.geno15G209 <- topTags(geno15G209.lrt,n = Inf)$table[topTags(geno15G209.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G209)
+#write.csv(DEgene.geno15G209, "DEgene.15G209.csv")
+
+geno15G267.lrt = glmLRT(fit2, coef = "geno15G267")
+topTags(geno15G267.lrt)
+DEgene.geno15G267 <- topTags(geno15G267.lrt,n = Inf)$table[topTags(geno15G267.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G267)
+#write.csv(DEgene.geno15G267, "DEgene.15G267.csv")
+
+geno15G368.lrt = glmLRT(fit2, coef = "geno15G368")
+topTags(geno15G368.lrt)
+DEgene.geno15G368 <- topTags(geno15G368.lrt,n = Inf)$table[topTags(geno15G368.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G368)
+#write.csv(DEgene.geno15G368, "DEgene.15G368.csv")
+
+genoEmperor.lrt = glmLRT(fit2, coef = "genoEmperor")
+topTags(genoEmperor.lrt)
+DEgene.genoEmperor <- topTags(genoEmperor.lrt,n = Inf)$table[topTags(genoEmperor.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.genoEmperor)
+#write.csv(DEgene.genoEmperor, "DEgene.Emperor.csv")
+```
+
+Are there any interesting genes in the DEgene lists?  
+```{r}
+int.gene = int$Int.Gene
+head(int.gene)
+DE.15G174.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G174))) == FALSE]
+length(DE.15G174.int) #2
+
+#DE.15G187.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G187))) == FALSE]
+#length(DE.15G187.int) #0
+
+DE.15G209.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G209))) == FALSE]
+length(DE.15G209.int) #2
+
+DE.15G267.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G267))) == FALSE]
+length(DE.15G267.int) #longest list, 7, happening to contain ALL the DE genes in other genotypes. 
+
+DE.15G368.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G368))) == FALSE]
+length(DE.15G368.int) #0
+
+DE.Emporer.int = int.gene[is.na(match(int.gene, rownames(DEgene.genoEmperor))) == FALSE]
+length(DE.Emporer.int) #4
+
+DE.int = data.frame(row.names = int.gene)
+DE.int$geno15G174 = DEgene.geno15G174$logFC[match(int.gene, rownames(DEgene.geno15G174))]
+#DE.int$geno15G187 = DEgene.geno15G187$logFC[match(int.gene, rownames(DEgene.geno15G187))]
+DE.int$geno15G209 = DEgene.geno15G209$logFC[match(int.gene, rownames(DEgene.geno15G209))]
+DE.int$geno15G267 = DEgene.geno15G267$logFC[match(int.gene, rownames(DEgene.geno15G267))] #longest list
+DE.int$geno15G368 = DEgene.geno15G368$logFC[match(int.gene, rownames(DEgene.geno15G368))]
+DE.int$Emperor = DEgene.genoEmperor$logFC[match(int.gene, rownames(DEgene.genoEmperor))]
+DE.int
+#write.csv(DE.int, file = "DE_InterestingGenes_ElDoradoRef_logFC.csv")
+```
+
+What about other genes on Chromosome5?
+
+```{r}
+chr5 = read.csv("Genes.Chr5.csv", stringsAsFactors = FALSE)
+DE.chr5 = data.frame(row.names = chr5$Gene)
+DE.chr5$geno15G174 = DEgene.geno15G174$logFC[match(chr5$Gene,rownames(DEgene.geno15G174))]
+DE.chr5$geno15G209 = DEgene.geno15G209$logFC[match(chr5$Gene,rownames(DEgene.geno15G209))]
+DE.chr5$geno15G267 = DEgene.geno15G267$logFC[match(chr5$Gene,rownames(DEgene.geno15G267))]
+DE.chr5$geno15G368 = DEgene.geno15G368$logFC[match(chr5$Gene,rownames(DEgene.geno15G368))]
+DE.chr5$Emperor = DEgene.genoEmperor$logFC[match(chr5$Gene,rownames(DEgene.genoEmperor))]
+DE.chr5
+#write.csv(DE.chr5, file = "DE_chromosome5_ElDoradoRef_logFC.csv")
+```
+
+
+****Taking block effect into account:  
+OK now that we've done the analysis, we want to check if there is a block effect.  We are only gonna do this with ElDorado as a reference.   
+```{r}
+desc$geno = relevel(desc$geno, ref = "ElDorado")
+design3 = model.matrix(~geno + block, data = desc)
+rownames(design3) = desc$sample
+design3
+design3 = design3[,-3] #taking out 187
+design3
+```
+
+```{r}
+dge.data3 = estimateGLMCommonDisp(dge.data, design3, verbose = TRUE)
+dge.data3 = estimateGLMTrendedDisp(dge.data3, design3)
+dge.data3 = estimateGLMTagwiseDisp(dge.data3, design3)
+plotBCV(dge.data3)
+```
+
+Finding DE genes:  
+```{r}
+fit3 = glmFit(dge.data3,design3)
+geno15G174.lrt = glmLRT(fit3, coef = "geno15G174")
+topTags(geno15G174.lrt)
+DEgene.geno15G174.b <- topTags(geno15G174.lrt,n = Inf)$table[topTags(geno15G174.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G174.b) #3353
+dim(DEgene.geno15G174) #2257
+table(is.na(match(rownames(DEgene.geno15G174.b), rownames(DEgene.geno15G174))) == FALSE) #2238 overlap. Not too bad.
+
+#write.csv(DEgene.geno15G174, "DEgene.15G174.csv")
+
+#geno15G187.lrt = glmLRT(fit2, coef = "geno15G187")
+#topTags(geno15G187.lrt)
+#DEgene.geno15G187 <- topTags(geno15G187.lrt,n = Inf)$table[topTags(geno15G187.lrt,n = Inf)$table$FDR<0.01,]
+#dim(DEgene.geno15G187)
+#write.csv(DEgene.geno15G187, "DEgene.15G187.csv")
+
+geno15G209.lrt = glmLRT(fit3, coef = "geno15G209")
+topTags(geno15G209.lrt)
+DEgene.geno15G209.b <- topTags(geno15G209.lrt,n = Inf)$table[topTags(geno15G209.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G209.b) #1582
+dim(DEgene.geno15G209) #1112
+table(is.na(match(rownames(DEgene.geno15G209.b), rownames(DEgene.geno15G209))) == FALSE) #1100
+#write.csv(DEgene.geno15G209, "DEgene.15G209.csv")
+
+geno15G267.lrt = glmLRT(fit3, coef = "geno15G267")
+topTags(geno15G267.lrt)
+DEgene.geno15G267.b <- topTags(geno15G267.lrt,n = Inf)$table[topTags(geno15G267.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G267.b) #5550
+dim(DEgene.geno15G267) #4613
+table(is.na(match(rownames(DEgene.geno15G267.b), rownames(DEgene.geno15G267))) == FALSE) #4596
+#write.csv(DEgene.geno15G267, "DEgene.15G267.csv")
+
+geno15G368.lrt = glmLRT(fit3, coef = "geno15G368")
+topTags(geno15G368.lrt)
+DEgene.geno15G368.b <- topTags(geno15G368.lrt,n = Inf)$table[topTags(geno15G368.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.geno15G368.b) #1148
+dim(DEgene.geno15G368) #878
+table(is.na(match(rownames(DEgene.geno15G368.b), rownames(DEgene.geno15G368))) == FALSE) #875
+#write.csv(DEgene.geno15G368, "DEgene.15G368.csv")
+
+genoEmperor.lrt = glmLRT(fit3, coef = "genoEmperor")
+topTags(genoEmperor.lrt)
+DEgene.genoEmperor.b <- topTags(genoEmperor.lrt,n = Inf)$table[topTags(genoEmperor.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.genoEmperor.b) #2383
+dim(DEgene.genoEmperor) #2395 !!!This is the first time the block effect model pulled out fewer genes than the non-block effect model!!!
+table(is.na(match(rownames(DEgene.genoEmperor.b), rownames(DEgene.genoEmperor))) == FALSE) #2337
+#write.csv(DEgene.genoEmperor, "DEgene.Emperor.csv")
+```
+
+Genes DE-ed by block?  
+```{r}
+block2.lrt = glmLRT(fit3, coef = "blockB2")
+topTags(block2.lrt)
+DEgene.block2 <- topTags(block2.lrt,n = Inf)$table[topTags(block2.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block2) #397
+
+block3.lrt = glmLRT(fit3, coef = "blockB3")
+topTags(block3.lrt)
+DEgene.block3 <- topTags(block3.lrt,n = Inf)$table[topTags(block3.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block3) #1842 = = 
+
+block4.lrt = glmLRT(fit3, coef = "blockB4")
+topTags(block4.lrt)
+DEgene.block4 <- topTags(block4.lrt,n = Inf)$table[topTags(block4.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block4) #704
+
+block5.lrt = glmLRT(fit3, coef = "blockB5")
+topTags(block5.lrt)
+DEgene.block5 <- topTags(block5.lrt,n = Inf)$table[topTags(block5.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block5) #1326 WTH
+
+block23.lrt = glmLRT(fit3, contrast = c(0,0,0,0,0,0,1,-1,0,0))
+topTags(block23.lrt)
+DEgene.block23 <- topTags(block23.lrt,n = Inf)$table[topTags(block23.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block23) #29 really small... donno if I did the contrast right. 
+
+block24.lrt = glmLRT(fit3, contrast = c(0,0,0,0,0,0,1,0,-1,0))
+topTags(block24.lrt)
+DEgene.block24 <- topTags(block24.lrt,n = Inf)$table[topTags(block24.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block24) #25 I don't understand what is going on...
+
+block25.lrt = glmLRT(fit3, contrast = c(0,0,0,0,0,0,1,0,0,-1))
+topTags(block25.lrt)
+DEgene.block25 <- topTags(block25.lrt,n = Inf)$table[topTags(block25.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block25) #149
+
+block34.lrt = glmLRT(fit3, contrast = c(0,0,0,0,0,0,0,1,-1,0))
+topTags(block34.lrt)
+DEgene.block34 <- topTags(block34.lrt,n = Inf)$table[topTags(block34.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block34) #1.......
+
+block35.lrt = glmLRT(fit3, contrast = c(0,0,0,0,0,0,0,1,0,-1))
+topTags(block35.lrt)
+DEgene.block35 <- topTags(block35.lrt,n = Inf)$table[topTags(block35.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block35) #18 
+
+block45.lrt = glmLRT(fit3, contrast = c(0,0,0,0,0,0,0,0,1,-1))
+topTags(block45.lrt)
+DEgene.block45 <- topTags(block45.lrt,n = Inf)$table[topTags(block45.lrt,n = Inf)$table$FDR<0.01,]
+dim(DEgene.block45) #0
+
+```
+
+
+Are there any interesting genes in the DEgene lists?  
+```{r}
+int.gene = int$Int.Gene
+head(int.gene)
+DE.15G174.int.b = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G174.b))) == FALSE]
+length(DE.15G174.int.b) #4!! Vs the 2 before adding block effect
+
+#DE.15G187.int = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G187))) == FALSE]
+#length(DE.15G187.int) #0
+
+DE.15G209.int.b = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G209.b))) == FALSE]
+length(DE.15G209.int.b) #2, the same as before
+
+DE.15G267.int.b = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G267.b))) == FALSE]
+length(DE.15G267.int.b) #longest list, 7, the same as before.
+
+DE.15G368.int.b = int.gene[is.na(match(int.gene, rownames(DEgene.geno15G368.b))) == FALSE]
+length(DE.15G368.int.b) #0, same ol' same ol'.
+
+DE.Emporer.int.b = int.gene[is.na(match(int.gene, rownames(DEgene.genoEmperor.b))) == FALSE]
+length(DE.Emporer.int.b) #4, same. 
+
+DE.int.block = data.frame(row.names = int.gene)
+DE.int.block$geno15G174 = DEgene.geno15G174.b$logFC[match(int.gene, rownames(DEgene.geno15G174.b))]
+#DE.int$geno15G187 = DEgene.geno15G187$logFC[match(int.gene, rownames(DEgene.geno15G187))]
+DE.int.block$geno15G209 = DEgene.geno15G209.b$logFC[match(int.gene, rownames(DEgene.geno15G209.b))]
+DE.int.block$geno15G267 = DEgene.geno15G267.b$logFC[match(int.gene, rownames(DEgene.geno15G267.b))] #longest list
+DE.int.block$geno15G368 = DEgene.geno15G368.b$logFC[match(int.gene, rownames(DEgene.geno15G368.b))]
+DE.int.block$Emperor = DEgene.genoEmperor.b$logFC[match(int.gene, rownames(DEgene.genoEmperor.b))]
+DE.int.block
+```
+
+Are there any interesting genes in the DE-by-block list?  
+```{r}
+DE.block2.int = int.gene[is.na(match(int.gene, rownames(DEgene.block2))) == FALSE]
+length(DE.block2.int) #0, yay.
+DE.block3.int = int.gene[is.na(match(int.gene, rownames(DEgene.block3))) == FALSE]
+length(DE.block3.int) #2. darn.
+DE.block4.int = int.gene[is.na(match(int.gene, rownames(DEgene.block4))) == FALSE]
+length(DE.block4.int) #0
+DE.block5.int = int.gene[is.na(match(int.gene, rownames(DEgene.block5))) == FALSE]
+length(DE.block5.int) #0
+DE.block23.int = int.gene[is.na(match(int.gene, rownames(DEgene.block23))) == FALSE]
+length(DE.block23.int) #0
+DE.block24.int = int.gene[is.na(match(int.gene, rownames(DEgene.block24))) == FALSE]
+length(DE.block24.int) #0
+DE.block25.int = int.gene[is.na(match(int.gene, rownames(DEgene.block25))) == FALSE]
+length(DE.block25.int) #0
+
+DE.int.block$block3 = DEgene.block3$logFC[match(int.gene, rownames(DEgene.block3))]
+
+DE.int.block
+write.csv(DE.int.block, file = "DE_wBlock_InterestingGenes_ElDoradoRef_logFC.csv")
+```
+
+
+
+What about other genes on Chromosome5?
+
+```{r}
+chr5 = read.csv("Genes.Chr5.csv", stringsAsFactors = FALSE)
+DE.chr5 = data.frame(row.names = chr5$Gene)
+DE.chr5$geno15G174 = DEgene.geno15G174$logFC[match(chr5$Gene,rownames(DEgene.geno15G174))]
+DE.chr5$geno15G209 = DEgene.geno15G209$logFC[match(chr5$Gene,rownames(DEgene.geno15G209))]
+DE.chr5$geno15G267 = DEgene.geno15G267$logFC[match(chr5$Gene,rownames(DEgene.geno15G267))]
+DE.chr5$geno15G368 = DEgene.geno15G368$logFC[match(chr5$Gene,rownames(DEgene.geno15G368))]
+DE.chr5$Emperor = DEgene.genoEmperor$logFC[match(chr5$Gene,rownames(DEgene.genoEmperor))]
+DE.chr5
+#write.csv(DE.chr5, file = "DE_chromosome5_ElDoradoRef_logFC.csv")
+```
+
+Two additional genes: Lsat_1_v5_gn_5_126860 and Lsat_1_v5_gn_5_126901
+```{r}
+DE.two = data.frame(row.names = c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"))
+dim(DE.two)
+DE.two$geno15G174 = DEgene.geno15G174$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G174))]
+DE.two$geno15G209 = DEgene.geno15G209$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G209))]
+DE.two$geno15G267 = DEgene.geno15G267$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G267))]
+DE.two$geno15G368 = DEgene.geno15G368$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.geno15G368))]
+DE.two$Emperor = DEgene.genoEmperor$logFC[match(c("Lsat_1_v5_gn_5_126860","Lsat_1_v5_gn_5_126901"),rownames(DEgene.genoEmperor))]
+DE.two
+```
+
